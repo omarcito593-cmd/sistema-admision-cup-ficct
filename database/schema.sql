@@ -1,6 +1,7 @@
 -- ==========================================
 -- BASE DE DATOS: bd_fitcct_postulantes
--- Sistema Web de Admision Universitaria FICCT
+-- Sistema Web de Admisión Universitaria FICCT
+-- Versión final actualizada
 -- ==========================================
 
 DROP TABLE IF EXISTS reportes CASCADE;
@@ -15,10 +16,6 @@ DROP TABLE IF EXISTS aulas CASCADE;
 DROP TABLE IF EXISTS carreras CASCADE;
 DROP TABLE IF EXISTS usuarios CASCADE;
 DROP TABLE IF EXISTS roles CASCADE;
-
--- =========================
--- TABLAS PRINCIPALES
--- =========================
 
 CREATE TABLE roles (
     id_rol SERIAL PRIMARY KEY,
@@ -42,28 +39,6 @@ CREATE TABLE carreras (
     sigla VARCHAR(10),
     cupo_maximo INT DEFAULT 0,
     estado VARCHAR(20) DEFAULT 'Activo'
-);
-
-CREATE TABLE postulantes (
-    id_postulante SERIAL PRIMARY KEY,
-    ci VARCHAR(20) NOT NULL UNIQUE,
-    nombre VARCHAR(100) NOT NULL,
-    apellido VARCHAR(100) NOT NULL,
-    fecha_nacimiento DATE NOT NULL,
-    sexo VARCHAR(20) NOT NULL,
-    direccion VARCHAR(150) NOT NULL,
-    telefono VARCHAR(20) NOT NULL,
-    correo VARCHAR(100) NOT NULL,
-    colegio_procedencia VARCHAR(150) NOT NULL,
-    ciudad VARCHAR(100) NOT NULL,
-    titulo_bachiller VARCHAR(20) NOT NULL,
-    otros TEXT,
-    estado VARCHAR(30) DEFAULT 'Postulante',
-    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    id_carrera INT NOT NULL,
-    id_carrera_segunda_opcion INT,
-    FOREIGN KEY (id_carrera) REFERENCES carreras(id_carrera),
-    FOREIGN KEY (id_carrera_segunda_opcion) REFERENCES carreras(id_carrera)
 );
 
 CREATE TABLE aulas (
@@ -93,13 +68,46 @@ CREATE TABLE docentes (
     id_docente SERIAL PRIMARY KEY,
     nombre VARCHAR(100) NOT NULL,
     apellido VARCHAR(100) NOT NULL,
-    ci VARCHAR(20) NOT NULL,
+    ci VARCHAR(20) NOT NULL UNIQUE,
     telefono VARCHAR(20),
     correo VARCHAR(100),
     profesion VARCHAR(100),
     maestria VARCHAR(20),
     diplomado VARCHAR(20),
     estado VARCHAR(20) DEFAULT 'Activo'
+);
+
+CREATE TABLE postulantes (
+    id_postulante SERIAL PRIMARY KEY,
+    ci VARCHAR(20) NOT NULL UNIQUE,
+    nombre VARCHAR(100) NOT NULL,
+
+    -- Campos finales usados por el sistema
+    apellido_paterno VARCHAR(100) NOT NULL,
+    apellido_materno VARCHAR(100) DEFAULT '',
+
+    -- Campo de compatibilidad por si alguna vista antigua usa apellido
+    apellido VARCHAR(200),
+
+    fecha_nacimiento DATE NOT NULL,
+    sexo VARCHAR(20) NOT NULL,
+    direccion VARCHAR(150) NOT NULL,
+
+    -- En el sistema se validó que pueda existir correo o teléfono.
+    -- Por eso estos campos no quedan como NOT NULL.
+    telefono VARCHAR(20),
+    correo VARCHAR(100),
+
+    colegio_procedencia VARCHAR(150) NOT NULL,
+    ciudad VARCHAR(100) NOT NULL,
+    titulo_bachiller VARCHAR(20) NOT NULL,
+    otros TEXT,
+    estado VARCHAR(30) DEFAULT 'Postulante',
+    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    id_carrera INT NOT NULL,
+    id_carrera_segunda_opcion INT,
+    FOREIGN KEY (id_carrera) REFERENCES carreras(id_carrera),
+    FOREIGN KEY (id_carrera_segunda_opcion) REFERENCES carreras(id_carrera)
 );
 
 CREATE TABLE postulante_grupo (
@@ -144,10 +152,50 @@ CREATE TABLE reportes (
     FOREIGN KEY (id_usuario) REFERENCES usuarios(id_usuario)
 );
 
--- =========================
--- TRIGGERS
--- =========================
+-- Restricciones adicionales
+CREATE UNIQUE INDEX ux_carreras_nombre
+ON carreras (LOWER(nombre_carrera));
 
+CREATE UNIQUE INDEX ux_aulas_nombre
+ON aulas (LOWER(nombre_aula));
+
+CREATE UNIQUE INDEX ux_materias_nombre
+ON materias (LOWER(nombre_materia));
+
+CREATE UNIQUE INDEX ux_grupos_aula_turno_activo
+ON grupos (id_aula, LOWER(turno))
+WHERE estado = 'Activo';
+
+CREATE UNIQUE INDEX ux_postulante_grupo_postulante
+ON postulante_grupo (id_postulante);
+
+CREATE UNIQUE INDEX ux_asignaciones_grupo_materia
+ON asignaciones (id_grupo, id_materia);
+
+CREATE UNIQUE INDEX ux_notas_postulante_materia
+ON notas (id_postulante, id_materia);
+
+CREATE UNIQUE INDEX ux_postulantes_nombre_completo
+ON postulantes (LOWER(nombre), LOWER(apellido_paterno), LOWER(apellido_materno));
+
+-- Completa el campo apellido para compatibilidad con vistas antiguas.
+CREATE OR REPLACE FUNCTION completar_apellido_postulante()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.apellido IS NULL OR TRIM(NEW.apellido) = '' THEN
+        NEW.apellido := TRIM(CONCAT_WS(' ', NEW.apellido_paterno, NEW.apellido_materno));
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_completar_apellido_postulante
+BEFORE INSERT OR UPDATE ON postulantes
+FOR EACH ROW
+EXECUTE FUNCTION completar_apellido_postulante();
+
+-- Calcula promedio ponderado y resultado.
 CREATE OR REPLACE FUNCTION calcular_promedio_resultado()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -171,7 +219,7 @@ BEFORE INSERT OR UPDATE ON notas
 FOR EACH ROW
 EXECUTE FUNCTION calcular_promedio_resultado();
 
-
+-- Valida que las notas estén entre 0 y 100.
 CREATE OR REPLACE FUNCTION validar_rango_notas()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -196,7 +244,7 @@ BEFORE INSERT OR UPDATE ON notas
 FOR EACH ROW
 EXECUTE FUNCTION validar_rango_notas();
 
-
+-- Valida cupo máximo del grupo.
 CREATE OR REPLACE FUNCTION validar_cupo_grupo()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -224,10 +272,7 @@ BEFORE INSERT ON postulante_grupo
 FOR EACH ROW
 EXECUTE FUNCTION validar_cupo_grupo();
 
--- =========================
--- DATOS INICIALES
--- =========================
-
+-- Datos iniciales
 INSERT INTO roles (nombre_rol, descripcion) VALUES
 ('Administrador', 'Usuario con acceso completo al sistema'),
 ('Secretaria', 'Usuario encargado del registro de postulantes'),
@@ -256,8 +301,8 @@ INSERT INTO materias (nombre_materia, estado) VALUES
 ('Física', 'Activo'),
 ('Inglés', 'Activo');
 
-INSERT INTO docentes 
-(nombre, apellido, ci, telefono, correo, profesion, maestria, diplomado, estado) 
+INSERT INTO docentes
+(nombre, apellido, ci, telefono, correo, profesion, maestria, diplomado, estado)
 VALUES
 ('Juan', 'Pérez', '1234567', '70000001', 'juan.perez@fitcct.edu.bo', 'Ingeniero de Sistemas', 'Si', 'Si', 'Activo'),
 ('María', 'Gómez', '7654321', '70000002', 'maria.gomez@fitcct.edu.bo', 'Licenciada en Matemáticas', 'Si', 'Si', 'Activo'),
@@ -269,11 +314,11 @@ INSERT INTO grupos (nombre_grupo, turno, id_aula, cupo_maximo, estado) VALUES
 ('Grupo C', 'Noche', 3, 70, 'Activo');
 
 INSERT INTO postulantes
-(ci, nombre, apellido, fecha_nacimiento, sexo, direccion, telefono, correo, colegio_procedencia, ciudad, titulo_bachiller, otros, estado, id_carrera, id_carrera_segunda_opcion)
+(ci, nombre, apellido_paterno, apellido_materno, fecha_nacimiento, sexo, direccion, telefono, correo, colegio_procedencia, ciudad, titulo_bachiller, otros, estado, id_carrera, id_carrera_segunda_opcion)
 VALUES
-('1001001', 'Ana', 'Rojas', '2006-04-12', 'Femenino', 'Av. Santos Dumont', '70011100', 'ana.rojas@gmail.com', 'Colegio Nacional Bolivia', 'Santa Cruz', 'Si', 'Presentó fotocopia de CI', 'Postulante', 1, 2),
-('1001002', 'Luis', 'Vargas', '2005-09-20', 'Masculino', 'Av. Virgen de Cotoca', '70022200', 'luis.vargas@gmail.com', 'Colegio La Salle', 'Santa Cruz', 'Si', 'Documentos completos', 'Postulante', 2, 1),
-('1001003', 'Carla', 'Suárez', '2006-01-15', 'Femenino', 'Barrio Equipetrol', '70033300', 'carla.suarez@gmail.com', 'Colegio Alemán', 'Santa Cruz', 'Si', 'Pendiente certificado adicional', 'Postulante', 1, 3);
+('1001001', 'Ana', 'Rojas', 'Mendoza', '2006-04-12', 'Femenino', 'Av. Santos Dumont', '70011100', 'ana.rojas@gmail.com', 'Colegio Nacional Bolivia', 'Santa Cruz', 'Si', 'Presentó fotocopia de CI', 'Postulante', 1, 2),
+('1001002', 'Luis', 'Vargas', 'Quiroga', '2005-09-20', 'Masculino', 'Av. Virgen de Cotoca', '70022200', 'luis.vargas@gmail.com', 'Colegio La Salle', 'Santa Cruz', 'Si', 'Documentos completos', 'Postulante', 2, 1),
+('1001003', 'Carla', 'Suárez', 'López', '2006-01-15', 'Femenino', 'Barrio Equipetrol', '70033300', 'carla.suarez@gmail.com', 'Colegio Alemán', 'Santa Cruz', 'Si', 'Pendiente certificado adicional', 'Postulante', 1, 3);
 
 INSERT INTO postulante_grupo (id_postulante, id_grupo) VALUES
 (1, 1),
