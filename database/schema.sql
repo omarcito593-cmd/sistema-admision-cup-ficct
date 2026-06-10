@@ -89,7 +89,7 @@ CREATE TABLE postulantes (
     -- Campo de compatibilidad por si alguna vista antigua usa apellido
     apellido VARCHAR(200),
 
-    fecha_nacimiento DATE NOT NULL,
+    fecha_nacimiento DATE,
     sexo VARCHAR(20) NOT NULL,
     direccion VARCHAR(150) NOT NULL,
 
